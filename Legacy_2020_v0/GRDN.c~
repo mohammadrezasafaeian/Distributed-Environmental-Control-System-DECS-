@@ -1,0 +1,793 @@
+/*******************************************************
+This program was created by the
+CodeWizardAVR V3.12 Advanced
+Automatic Program Generator
+© Copyright 1998-2014 Pavel Haiduc, HP InfoTech s.r.l.
+http://www.hpinfotech.com
+
+Project : 
+Version : 
+Date    : 26/09/2016
+Author  : 
+Company : 
+Comments: 
+
+
+Chip type               : ATmega32
+Program type            : Application
+AVR Core Clock frequency: 8/000000 MHz
+Memory model            : Small
+External RAM size       : 0
+Data Stack size         : 512
+*******************************************************/
+
+#include <mega32.h>
+
+#include <delay.h>
+// Alphanumeric LCD functions
+#include <alcd.h>
+#include <stdio.h>
+#include <delay.h>
+flash char PNUM = 4;
+flash char PLNUM = 4;
+flash char layout[16] = {'7','8','9','/',
+                         '4','5','6','*',           
+                         '3','2','1','-',
+                         'c','0','=','+'};    
+enum states {s0,s1,s2,s3,s4,s5,s6,s7,s8,s9} state=s0;
+char st[30],i,k=0,n=0,st1[17],a,q,r,g,m,l,h,com;
+bit b=0;
+char shift[4] = {0XE0,0XD0,0XB0,0X70};
+int sec=0,light,c,j;
+void setstate (void);  
+void read_sensors (void);
+void keypadscan (void);
+void set_tresholds (void);
+char getnum (void); 
+void select_plant(char input);
+void control(void);
+void sms_command(void);
+    struct 
+    {
+    char name[17],sec,min,hour,day,mounth,sectr,mintr,hourtr,daytr,mounthtr,ab,on[3]; 
+    int  sensortr[3],sensor[3];
+    }p[PNUM];  
+    struct Plants{
+    char name[17],sec,min,hour,day,mounth;
+    int sensortr[3];
+    }Pl[PLNUM];
+    
+flash char names[PLNUM][17] = {"rose","aftabgardan","kaktoos","shandooni"};
+flash char secs[PLNUM] = {4,7,10,6};
+flash char mins[PLNUM] = {0,0,0,0};
+flash char hours[PLNUM] = {0,0,0,0};
+flash char days[PLNUM] = {0,0,0,0};
+flash int sensors[PLNUM][3] = {{100,200,300},{400,500,600},{700,800,900},{150,250,350}};
+void init_struct(void);
+//Plants plnt[4] = {{4,0,0,0,0,{100,200,300}},{7,0,0,0,0,{400,500,600}},{10,0,0,0,0,{700,800,900}},{6,0,0,0,0,{250,350,450}}};
+//interrupt [EXT_INT0] void ext_int0_isr(void)
+//    {
+//    j++;
+//    if(j==PNUM)
+//    j = 0; 
+//    }
+//
+//// External Interrupt 1 service routine
+//interrupt [EXT_INT1] void ext_int1_isr(void)
+//    {
+//    b = ~b;
+//    }
+
+#define DATA_REGISTER_EMPTY (1<<UDRE)
+#define RX_COMPLETE (1<<RXC)
+#define FRAMING_ERROR (1<<FE)
+#define PARITY_ERROR (1<<UPE)
+#define DATA_OVERRUN (1<<DOR)
+
+// USART Receiver buffer
+#define RX_BUFFER_SIZE 128
+char rx_buffer[RX_BUFFER_SIZE];
+
+#if RX_BUFFER_SIZE <= 256
+unsigned char rx_wr_index=0,rx_rd_index=0;
+#else
+unsigned int rx_wr_index=0,rx_rd_index=0;
+#endif
+
+#if RX_BUFFER_SIZE < 256
+unsigned char rx_counter=0;
+#else
+unsigned int rx_counter=0;
+#endif
+
+// This flag is set on USART Receiver buffer overflow
+bit rx_buffer_overflow;
+
+// USART Receiver interrupt service routine
+interrupt [USART_RXC] void usart_rx_isr(void)
+    {
+    char status,data;
+    status=UCSRA;
+    data=UDR;
+    if ((status & (FRAMING_ERROR | PARITY_ERROR | DATA_OVERRUN))==0)
+           {
+           rx_buffer[rx_wr_index++]=data;
+        #if RX_BUFFER_SIZE == 256
+           // special case for receiver buffer size=256
+           if (++rx_counter == 0) rx_buffer_overflow=1;
+        #else
+           if (rx_wr_index == RX_BUFFER_SIZE) rx_wr_index=0;
+           if (++rx_counter == RX_BUFFER_SIZE)
+              {
+              rx_counter=0;
+              rx_buffer_overflow=1;
+              }
+        #endif
+           }
+        }
+
+#ifndef _DEBUG_TERMINAL_IO_
+// Get a character from the USART Receiver buffer
+#define _ALTERNATE_GETCHAR_
+#pragma used+
+char getchar(void)
+    {
+    char data;
+    while (rx_counter==0);
+    data=rx_buffer[rx_rd_index++];
+    #if RX_BUFFER_SIZE != 256
+    if (rx_rd_index == RX_BUFFER_SIZE) rx_rd_index=0;
+    #endif
+    #asm("cli")
+    --rx_counter;
+    #asm("sei")
+    return data;
+    }
+#pragma used-
+#endif
+
+// USART Transmitter buffer
+#define TX_BUFFER_SIZE 8
+char tx_buffer[TX_BUFFER_SIZE];
+
+#if TX_BUFFER_SIZE <= 256
+unsigned char tx_wr_index=0,tx_rd_index=0;
+#else
+unsigned int tx_wr_index=0,tx_rd_index=0;
+#endif
+
+#if TX_BUFFER_SIZE < 256
+unsigned char tx_counter=0;
+#else
+unsigned int tx_counter=0;
+#endif
+
+// USART Transmitter interrupt service routine
+interrupt [USART_TXC] void usart_tx_isr(void)
+    {
+    if (tx_counter)
+       {
+       --tx_counter;
+       UDR=tx_buffer[tx_rd_index++];
+    #if TX_BUFFER_SIZE != 256
+       if (tx_rd_index == TX_BUFFER_SIZE) tx_rd_index=0;
+    #endif
+       }
+    }
+
+#ifndef _DEBUG_TERMINAL_IO_
+// Write a character to the USART Transmitter buffer
+#define _ALTERNATE_PUTCHAR_
+#pragma used+
+void putchar(char c)
+    {
+    while (tx_counter == TX_BUFFER_SIZE);
+    #asm("cli")
+    if (tx_counter || ((UCSRA & DATA_REGISTER_EMPTY)==0))
+       {
+       tx_buffer[tx_wr_index++]=c;
+    #if TX_BUFFER_SIZE != 256
+       if (tx_wr_index == TX_BUFFER_SIZE) tx_wr_index=0;
+    #endif
+       ++tx_counter;
+       }
+    else
+       UDR=c;
+    #asm("sei")
+    }
+#pragma used-
+#endif
+
+// Standard Input/Output functions
+#include <stdio.h>
+
+// Timer1 output compare A interrupt service routine
+interrupt [TIM1_COMPA] void timer1_compa_isr(void)
+        { 
+        
+        for(h=0;h<PNUM;h++)
+            {
+            p[h].sec++; 
+                if(p[h].sec == 60)
+                {
+                p[h].sec = 0;
+                p[h].min++;
+                    if(p[h].min==60)
+                    {
+                     p[h].min = 0;
+                     p[h].hour ++;
+                        if(p[h].hour==24)
+                        {
+                        p[h].hour = 0;
+                        p[h].day++;
+                            if(p[h].day==30)
+                            {
+                            p[h].mounth++;
+                            p[h].day = 0;
+                                if(p[h].mounth==12)
+                                p[h].mounth = 0;
+                                
+                                
+                            } 
+                            
+                            
+                        }
+                        
+                        
+                    } 
+                    
+                    
+                } 
+                 
+                
+            }  
+            
+         }   
+// Voltage Reference: AREF pin
+#define ADC_VREF_TYPE ((0<<REFS1) | (0<<REFS0) | (0<<ADLAR))
+
+ //Read the AD conversion result
+unsigned int read_adc(unsigned char adc_input)
+    {
+    ADMUX=adc_input | ADC_VREF_TYPE;
+    // Delay needed for the stabilization of the ADC input voltage
+    delay_us(10);
+    // Start the AD conversion
+    ADCSRA|=(1<<ADSC);
+    // Wait for the AD conversion to complete
+    while ((ADCSRA & (1<<ADIF))==0);
+    ADCSRA|=(1<<ADIF);
+    return ADCW;
+    }
+
+void main(void)
+    { 
+    
+    // Declare your local variables here
+
+    // Input/Output Ports initialization
+    // Port A initialization
+    // Function: Bit7=In Bit6=In Bit5=In Bit4=In Bit3=In Bit2=In Bit1=In Bit0=In 
+    DDRA=(1<<DDA7) | (1<<DDA6) | (1<<DDA5) | (1<<DDA4) | (0<<DDA3) | (0<<DDA2) | (0<<DDA1) | (0<<DDA0);
+    // State: Bit7=T Bit6=T Bit5=T Bit4=T Bit3=T Bit2=T Bit1=T Bit0=T 
+    PORTA=(0<<PORTA7) | (0<<PORTA6) | (0<<PORTA5) | (0<<PORTA4) | (0<<PORTA3) | (0<<PORTA2) | (0<<PORTA1) | (0<<PORTA0);
+
+    // Port B initialization
+    DDRB=(1<<DDB7) | (1<<DDB6) | (1<<DDB5) | (1<<DDB4) | (1<<DDB3) | (1<<DDB2) | (1<<DDB1) | (1<<DDB0);
+    // State: Bit7=T Bit6=T Bit5=T Bit4=T Bit3=T Bit2=T Bit1=T Bit0=T 
+    PORTB=(0<<PORTB7) | (0<<PORTB6) | (0<<PORTB5) | (0<<PORTB4) | (0<<PORTB3) | (0<<PORTB2) | (0<<PORTB1) | (0<<PORTB0);
+
+    // Port C initialization
+    // Function: Bit7=In Bit6=In Bit5=In Bit4=In Bit3=In Bit2=In Bit1=In Bit0=In 
+    DDRC=(0<<DDC7) | (0<<DDC6) | (0<<DDC5) | (0<<DDC4) | (0<<DDC3) | (0<<DDC2) | (0<<DDC1) | (0<<DDC0);
+    // State: Bit7=T Bit6=T Bit5=T Bit4=T Bit3=T Bit2=T Bit1=T Bit0=T 
+    PORTC=(0<<PORTC7) | (0<<PORTC6) | (0<<PORTC5) | (0<<PORTC4) | (0<<PORTC3) | (0<<PORTC2) | (0<<PORTC1) | (0<<PORTC0);
+
+    // Port D initialization
+    // Function: Bit7=In Bit6=In Bit5=In Bit4=In Bit3=In Bit2=In Bit1=In Bit0=In 
+    DDRD=0x00;
+    // State: Bit7=T Bit6=T Bit5=T Bit4=P Bit3=P Bit2=P Bit1=P Bit0=P 
+    PORTD=(0<<PORTD7) | (0<<PORTD6) | (0<<PORTD5) | (1<<PORTD4) | (1<<PORTD3) | (1<<PORTD2) | (1<<PORTD1) | (1<<PORTD0); 
+    
+//Timer/Counter 1 initialization
+//     Clock source: System Clock
+//     Clock value: 15/625 kHz
+//     Mode: CTC top=OCR1A
+//     OC1A output: Disconnected
+//     OC1B output: Disconnected
+//     Noise Canceler: Off
+//     Input Capture on Falling Edge
+//     Timer Period: 1 s
+//     Timer1 Overflow Interrupt: Off
+//     Input Capture Interrupt: Off
+//     Compare A Match Interrupt: On
+//     Compare B Match Interrupt: Off
+    TCCR1A=(0<<COM1A1) | (0<<COM1A0) | (0<<COM1B1) | (0<<COM1B0) | (0<<WGM11) | (0<<WGM10);
+    TCCR1B=(0<<ICNC1) | (0<<ICES1) | (0<<WGM13) | (1<<WGM12) | (0<<CS12) | (1<<CS11) | (1<<CS10);
+    TCNT1H=0x00;
+    TCNT1L=0x00;
+    ICR1H=0x00;
+    ICR1L=0x00;
+    OCR1AH=0x3D;
+    OCR1AL=0x08;
+    OCR1BH=0x00;
+    OCR1BL=0x00;
+//
+    // Timer(s)/Counter(s) Interrupt(s) initialization
+    TIMSK=(0<<OCIE2) | (0<<TOIE2) | (0<<TICIE1) | (1<<OCIE1A) | (0<<OCIE1B) | (0<<TOIE1) | (0<<OCIE0) | (0<<TOIE0);
+
+    // External Interrupt(s) initialization
+    // INT0: On
+    // INT0 Mode: Falling Edge
+    // INT1: On
+    // INT1 Mode: Falling Edge
+    // INT2: Off
+    GICR|=(1<<INT1) | (1<<INT0) | (0<<INT2);
+    MCUCR=(1<<ISC11) | (0<<ISC10) | (1<<ISC01) | (0<<ISC00);
+    MCUCSR=(0<<ISC2);
+    GIFR=(1<<INTF1) | (1<<INTF0) | (0<<INTF2);
+
+    // USART initialization
+    // Communication Parameters: 8 Data, 1 Stop, No Parity
+    // USART Receiver: On
+    // USART Transmitter: On
+    // USART Mode: Asynchronous
+    // USART Baud Rate: 9600
+    UCSRA=(0<<RXC) | (0<<TXC) | (0<<UDRE) | (0<<FE) | (0<<DOR) | (0<<UPE) | (0<<U2X) | (0<<MPCM);
+    UCSRB=(1<<RXCIE) | (1<<TXCIE) | (0<<UDRIE) | (1<<RXEN) | (1<<TXEN) | (0<<UCSZ2) | (0<<RXB8) | (0<<TXB8);
+    UCSRC=(1<<URSEL) | (0<<UMSEL) | (0<<UPM1) | (0<<UPM0) | (0<<USBS) | (1<<UCSZ1) | (1<<UCSZ0) | (0<<UCPOL);
+    UBRRH=0x00;
+//    UBRRL=0x33; 
+//    pl[0] = {"rose",4,0,0,0,0,{100,200,300}};
+//    pl[1] = {"aftabgardan",7,0,0,0,0,{400,500,600}};
+//    pl[2] = {"kaktoos",10,0,0,0,0,{700,800,900}};
+//    pl[3] = {"shandooni",6,0,0,0,0,{250,350,450}};
+// External Interrupt 0 service routine
+    p[0].sec = 10;
+    p[1].sec = 20;
+    p[2].sec = 30; 
+    // ADC initialization
+    // ADC Clock frequency: 1000/000 kHz
+    // ADC Voltage Reference: AREF pin
+    // ADC Auto Trigger Source: ADC Stopped
+    ADMUX=ADC_VREF_TYPE;
+    ADCSRA=(1<<ADEN) | (0<<ADSC) | (0<<ADATE) | (0<<ADIF) | (0<<ADIE) | (0<<ADPS2) | (1<<ADPS1) | (1<<ADPS0);
+    SFIOR=(0<<ADTS2) | (0<<ADTS1) | (0<<ADTS0);
+    init_struct();
+    lcd_clear();
+    // Alphanumeric LCD initialization
+    // Connections are specified in the
+    // Project|Configure|C Compiler|Libraries|Alphanumeric LCD menu:
+    // RS - PORTC Bit 0
+    // RD - PORTC Bit 1
+    // EN - PORTC Bit 2
+    // D4 - PORTC Bit 4
+    // D5 - PORTC Bit 5
+    // D6 - PORTC Bit 6
+    // D7 - PORTC Bit 7
+    // Characters/line: 16
+    lcd_init(16);             
+             for(l=0;l<3;l++){ 
+              lcd_gotoxy(1,1);
+            lcd_puts("W E L C O M E !"); 
+                delay_ms(400);
+                lcd_clear(); 
+                delay_ms(250);           
+                } 
+                lcd_clear();
+
+    // Global enable interrupts
+    #asm("sei")
+
+    while (1)
+          {     
+            sms_command();
+            read_sensors();
+            keypadscan();
+            setstate();
+            control();
+            }                                                                      
+          }   
+        
+     
+    
+void setstate (void)
+    {
+        switch (state) {
+        case s0:
+              lcd_gotoxy(0,1);
+            lcd_puts(" >>T A E E N E");
+            lcd_gotoxy(0,2);
+            lcd_puts("  G I A H A N");
+            
+            if (q==15) {
+            lcd_clear(); 
+            state = s1;  
+            }
+            break;
+        case s1:
+            
+            if(q==11 && j<(PNUM-1)){ 
+            lcd_clear();
+            j++;                           }
+            if(q==7 && j>0 ){  
+            lcd_clear();
+            j--;                       }
+            for(i=0;i<PNUM;i++)
+            {  
+                if(i != j){
+                lcd_gotoxy(0,i);
+                sprintf(st,"giahe%d",i+1);
+                lcd_puts(st);
+                }
+                }  
+                lcd_gotoxy(0,j);
+                sprintf(st,"->giahe%d",j+1);
+                lcd_puts(st); 
+            if(q==15)  {
+            lcd_clear(); 
+             state = s8;
+             }
+            if(q==3){
+            lcd_clear(); 
+             state = s0; 
+             }    
+        break;
+            
+        case s2:
+            lcd_gotoxy(0,0);
+            sprintf(st,"timer:%02d:%02d:%02d",p[j].hour,p[j].min,p[j].sec);
+            lcd_puts(st);
+            lcd_gotoxy(0,1);
+            sprintf(st,"s1:%003d s2:%003d",p[j].sensor[0],p[j].sensor[1]);
+            lcd_puts(st);
+            lcd_gotoxy(0,2);
+            sprintf(st,"tanzime saat");
+            lcd_puts(st);
+            lcd_gotoxy(0,3);
+            sprintf(st,"->tanzime sensor");
+            lcd_puts(st); 
+                if(q==3){
+                lcd_clear(); 
+                state = s1;  
+                }
+                if(q==15){
+                lcd_clear(); 
+                state = s3;  
+                }
+                if(q==7){
+                lcd_clear(); 
+                state = s4;  
+                }
+         break;
+        case s4:
+            lcd_gotoxy(0,0);
+            sprintf(st,"timer:%02d:%02d:%02d",p[j].hour,p[j].min,p[j].sec);
+            lcd_puts(st);
+            lcd_gotoxy(0,1);
+            sprintf(st,"s1:%003d s2:%003d",p[j].sensor[0],p[j].sensor[1]);
+            lcd_puts(st);
+            lcd_gotoxy(0,2);
+            sprintf(st,"->tanzime saat");
+            lcd_puts(st);
+            lcd_gotoxy(0,3);
+            sprintf(st,"tanzime sensor");
+            lcd_puts(st); 
+                if(q==3){
+                state = s1;
+                lcd_clear(); 
+                }
+                if(q==11){
+                lcd_clear(); 
+                state = s2;  
+                }
+                if(q==15)    {
+                lcd_clear(); 
+                state = s3;   
+                }
+        break ;
+        case s3:   
+            set_tresholds();    
+                if(q==12){
+                lcd_clear(); 
+                state = s2;  
+                } 
+        break; 
+        case s6:
+            if(q==11 && a<(PLNUM) && a>-1)
+            { 
+            lcd_clear();
+            a++;                           }
+            if(q==7 && a>0 && a<PLNUM)
+            {  
+            lcd_clear();
+            a--;                        }
+            if(a!= 3) {
+            lcd_gotoxy(0,3);
+            lcd_puts("dasti");
+            }
+            for(l=0;l<(PLNUM-1);l++)
+            {
+                
+                if(l==a)
+                {
+                lcd_gotoxy(0,l);
+                lcd_puts("->");
+                lcd_gotoxy(2,l);
+                for(g=0;g<17;g++)
+                st[g] = Pl[a].name[g];
+                lcd_puts(st);
+                }
+                else
+                { 
+                for(g=0;g<17;g++)
+                st[g] = Pl[l].name[g];
+                lcd_gotoxy(0,l);
+                lcd_puts(st);
+                } 
+            }
+            if(a==PLNUM-1)
+            {
+            if(q==15)
+            state = s2;
+            lcd_gotoxy(0,PLNUM-1);
+            sprintf(st,"->dasti");
+            lcd_puts(st);
+            }
+              else
+            {
+                if(q==15)
+                       {
+                    lcd_clear();
+                    state = s7; 
+                    }
+            } 
+
+                if(q==3){
+                lcd_clear(); 
+                state = s1;  
+                } 
+        break;        
+            
+        case s7:
+            select_plant(a);
+            for(g=0;g<17;g++)
+            st[g] = Pl[a].name[g];
+            lcd_gotoxy(0,0);
+            lcd_puts(st);
+            sprintf(st," :giahe%d",j+1);          
+            lcd_puts(st);
+            sprintf(st,"s1T:%003d s2T:%003d",p[j].sensortr[0],p[j].sensortr[1]); 
+            lcd_gotoxy(0,2);
+            lcd_puts(st); 
+            sprintf(st,"abyarihar%drooz",p[j].sectr); 
+            lcd_gotoxy(0,3);
+            lcd_puts(st);
+                if(q==3 || q==15){
+                lcd_clear(); 
+                state = s6;  
+                } 
+        break; 
+              
+        case s8:
+            if(q==11 || q==7)
+            { 
+            lcd_clear();
+            b = ~b;                           }
+            lcd_gotoxy(0,b);
+            lcd_puts("->");
+            lcd_gotoxy(2,0);
+            lcd_puts("taeene giah");
+            lcd_gotoxy(2,1);
+            lcd_puts("vazeiate giah");
+            if(b){
+              if(q==15)
+                {
+                lcd_clear();
+                state = s9;}
+             } 
+             
+            else{
+              if(q==15){
+              lcd_clear();
+              state = s6;
+              }
+              }         
+              
+            if(q==3)
+            {
+             lcd_clear();
+              state = s1;
+            }
+        break;
+        case s9:
+            sprintf(st,"giahe%dom:",j+1);
+            lcd_gotoxy(0,0);
+            lcd_puts(st);
+            for(g=0;g<17;g++)
+            st[g] = p[j].name[g];
+            lcd_gotoxy(0,1);
+            lcd_puts(st);
+            sprintf(st,"s1:%003d   s2:%003d",p[j].sensor[0],p[j].sensor[1]); 
+            lcd_gotoxy(0,2);
+            lcd_puts(st); 
+            sprintf(st,"timer:%002d:%002d:%002d",p[j].hour,p[j].min,p[j].sec); 
+            lcd_gotoxy(0,3);
+            lcd_puts(st);
+            if(q==3||q==15)
+            {
+             lcd_clear();
+              state = s8;
+            }
+        break;
+         }
+    }
+
+void keypadscan (void)
+        {   
+       for (r=0;r<4;r++)
+            {   
+                PORTD = 0xf0; 
+                PORTA = shift[r];
+                c = -1;
+                if (PIND.4 == 0)
+                c = 0;
+                if (PIND.5 == 0)
+                c = 1;
+                if (PIND.6 == 0)
+                c = 2;
+                if (PIND.7 == 0)
+                c = 3;    
+//                delay_ms(500) ;
+                    if (c != -1){
+                    q = (r)*4+c;
+                    }  
+                }     
+                PORTA.4 = 0;   
+                PORTA.5 = 0;
+                PORTA.6 = 0;
+                PORTA.7 = 0;   
+                if(PIND.4 && PIND.5 && PIND.6 && PIND.7 )
+                q = 20;
+                while(PIND.4==0||PIND.5==0||PIND.6==0||PIND.7==0){} 
+        }
+        
+void read_sensors (void)
+        {
+         p[0].sensor[0] = read_adc(0);
+         p[0].sensor[1] = read_adc(1);
+         p[1].sensor[0] = read_adc(2);
+         p[1].sensor[1] = read_adc(3);
+         
+        }        
+void set_tresholds (void) 
+        {     
+            if(q==11 && k<1){ 
+            lcd_clear();
+            k++;                           }
+            if(q==7 && k>0){  
+            lcd_clear();
+            k--;                       } 
+            for(i=0;i<2;i++)    {
+                if(i != k){
+                lcd_gotoxy(0,i);
+                sprintf(st,"sensor%d:%003d",(i+1),p[j].sensortr[i]);
+                lcd_puts(st);
+                }
+            }    
+                lcd_gotoxy(0,k);
+                sprintf(st,"->sensor%d:%003d",(k+1),p[j].sensortr[k]);
+                lcd_puts(st);
+            }
+char getnum (void)
+        { 
+        if(~(PIND.4 && PIND.5 && PIND.6 && PIND.7))
+            {
+            if(q==0)
+            return 1;
+            if(q==1)
+            return 2;
+            if(q==2)
+            return 3;
+            if(q==4)
+            return 4;
+            if(q==5)
+            return 5;
+            if(q==6)
+            return 6;
+            if(q==8)
+            return 7;
+            if(q==9)
+            return 8;
+            if(q==10)
+            return 9;
+            if(q==13)
+            return 0;
+            } 
+            while(PIND.4==0||PIND.5==0||PIND.6==0||PIND.7==0){}
+        }    
+void init_struct(void)
+    {
+        for(i=0;i<PLNUM;i++){
+        Pl[i].sec = secs[i];
+        Pl[i].min = mins[i];
+        Pl[i].hour = hours[i];
+        Pl[i].day = days[i];
+            for(l=0;l<14;l++)
+            {
+            Pl[i].name[l] = names[i][l];
+            }
+            for(l=0;l<3;l++)
+            {
+            Pl[i].sensortr[l] = sensors[i][l];
+            }
+        }
+    }     
+void select_plant(char input)
+    {
+    p[j].sectr = Pl[input].sec;
+    p[j].hourtr = Pl[input].hour;
+    p[j].daytr = Pl[input].day;
+    p[j].mounthtr = Pl[input].mounth;
+        for(m=0;m<3;m++)
+        {
+        p[j].sensortr[m] = Pl[input].sensortr[m];
+        } 
+        for(m=0;m<17;m++)
+        {
+        p[j].name[m] = Pl[input].name[m];
+        } 
+        
+    p[j].sec = 0;
+    p[j].hour = 0;
+    p[j].day = 0;
+    p[j].mounth = 0;
+    }
+void control(void)
+    {
+     for(g=0;g<PNUM;g++)
+     {
+        if(p[g].sec>p[g].sectr)
+        {
+         p[g].ab=1;
+         p[g].sec = 0;
+        }
+        if((p[g].ab) && (p[g].sec>3) )
+        {
+        p[g].ab=0;
+        p[g].sec = 0;
+        }
+        for(l=0;l<3;l++)
+        {
+            if(p[g].sensor[l]>p[g].sensortr[l]) 
+            {
+            p[g].on[l] = 1;
+            } 
+            else
+            {
+            p[g].on[l] = 0;
+            }  
+        }
+     } 
+     
+     PORTB.0 = p[0].ab;
+     PORTB.1 = p[1].ab;
+     PORTB.2 = p[0].on[0]; 
+     PORTB.3 = p[0].on[1];
+     PORTB.4 = p[1].on[0];
+     PORTB.5 = p[1].on[1];
+     
+    }
+void sms_command(void)
+    {
+        if(com == 1)
+        {
+             p[1].ab=1;
+             p[1].sec = 0;
+        } 
+        if(com == 2)
+        {
+             p[2].ab=1;
+             p[2].sec = 0;
+        }  
+    }
