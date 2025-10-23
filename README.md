@@ -34,9 +34,9 @@ This project started in 2020 as a simple, monolithic AVR-based controller.
     └──────────────┘  └────────────┘
 ```
 ### Key Design Decisions
-1. **Centralized Intelligence (STM32)**: Decision logic and profiles live only on the Master. The distributed nodes are designed as "dumb" I/O extenders, making them cheap and easy to replace in harsh environments.
-2. **Distributed I/O (AVR)**: ATmega32 nodes handle the 5V sensor interfacing and high-voltage relay switching, isolating the sensitive 3.3V STM32 master from electrical noise.
-3. **Hysteresis Control**: Implemented ±50 ADC unit buffer to prevent pumps/fans from rapid-cycling (chattering) near threshold values.
+1. **2-Wire Scalability (I2C)**: By using AVRs as addressable I2C nodes, the entire facility requires only **two shared data wires** to control 100+ separate zones (theoretically) via a single master chip. This drastically reduces total cost and cabling complexity compared to star-topology (individual wiring) systems.
+2. **Voltage/Noise Isolation**: Field nodes handle 5V relay switching and sensor noise locally, protecting the sensitive 3.3V STM32 master from industrial environment interference.
+3. **Centralized Logic**: All profile data and decision algorithms reside solely on the Master; therefore, field nodes require no configuration upon replacement.
 
 ---
 ## Communication Protocols
