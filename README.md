@@ -1,3 +1,6 @@
+> **[🇮🇷 برای مشاهده مستندات به زبان فارسی اینجا کلیک کنید](README_FA.md)**
+
+
 # Distributed Control and Automation System
 *Distributed automation platform: STM32 Brain controlling scalable AVR field nodes via I2C, with ESP32 Web Dashboard.*
 
