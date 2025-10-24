@@ -14,7 +14,7 @@ A distributed embedded system designed for scalable environmental automation. Wh
 ---
 ## Project History & Evolution
 This project started in 2020 as a simple, monolithic AVR-based controller.
-> [👉 **View the original 2020 legacy code here**](legacy_2020_v0/) to see the architectural evolution from a single-chip beginner project to today's distributed, professional-grade system.
+> [👉 **View the original 2020 legacy code here**](Legacy_2020_v0/) to see the architectural evolution from a single-chip beginner project to today's distributed, professional-grade system.
 
 ---
 ## System Architecture
