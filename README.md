@@ -180,9 +180,5 @@ MIT License - feel free to use for learning/portfolio purposes
 ## Contact
 
 **Mohammad Reza Safaeian**  
-📧 mohammad.rsafaeian@gmail.com  
+- mohammad.rsafaeian@gmail.com  
 ---
-### File Structure
-```
-See detailed structure above...
-```
