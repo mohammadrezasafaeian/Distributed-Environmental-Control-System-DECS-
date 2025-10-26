@@ -175,6 +175,7 @@ Or view directly:
 ---
 ## License
 MIT License - feel free to use for learning/portfolio purposes
+
 ---
 ## Contact
 
