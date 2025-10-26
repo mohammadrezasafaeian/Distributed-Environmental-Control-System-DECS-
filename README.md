@@ -158,6 +158,12 @@ STM32F411
 
 ## Demo Video
 
+https://github.com/mohammadrezasafaeian/Distributed-Environmental-Control-System-DECS-/raw/refs/heads/main/docs/DECS_Pr_Demo.mp4
+
+*Click the link above to download and watch the demonstration*
+
+Or view directly:
+![Demo](docs/DECS_Pr_Demo.mp4)
 
 ---
 ## Future Improvements
